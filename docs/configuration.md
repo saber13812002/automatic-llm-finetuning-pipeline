@@ -12,11 +12,32 @@ LLaMA-Factory options the wrapper does not expose.
 | --- | --- | --- |
 | `model.name` | Yes | Nonempty HuggingFace identifier for a supported family |
 | `model.template` | No | Automatic by default; an incompatible explicit override fails |
+| `model.revision` | No | Hub branch, tag, or commit passed as `model_revision`; resolved commit is recorded when available |
 
 Do not supply `family` to select behavior. Family/template are resolved and
 recorded automatically. Config inspection can fall back to a recognizable name
 with a warning when fetching is unavailable. Name/config conflicts, unsupported
 families, and uncertain Llama generation stop preparation before training.
+Revision lookup is best-effort: cached/offline runs remain supported, and
+metadata records why a resolved Hub commit was unavailable.
+
+## Optional container provenance
+
+An orchestrator may supply non-secret image identity under `provenance.container`:
+
+```yaml
+provenance:
+  container:
+    image: registry.example/fine-tuner:h100
+    image_id: sha256:...
+    image_digest: sha256:...
+    runtime: docker
+```
+
+The launcher variables `PIPELINE_CONTAINER_IMAGE`,
+`PIPELINE_CONTAINER_IMAGE_ID`, `PIPELINE_CONTAINER_IMAGE_DIGEST`,
+`PIPELINE_CONTAINER_RUNTIME`, `PIPELINE_CONTAINER_ID`, and
+`PIPELINE_CONTAINERIZED` take precedence. Never put credentials in these values.
 
 ## Dataset
 
@@ -107,8 +128,9 @@ fields today; do not add them to YAML and expect upstream pass-through.
 
 `fp32` disables the upstream mixed-precision flags; it does not guarantee frozen
 base weights are reloaded in float32. The backend may retain the model config's
-weight dtype for LoRA. GPU/BF16/FP16 capability is a host/backend constraint and
-has not been acceptance-qualified here.
+weight dtype for LoRA. BF16 was validated in one narrow Qwen2.5-0.5B H100 Docker
+LoRA smoke run. FP16 has not been separately accepted, and broader
+model/hardware combinations remain host/backend-dependent.
 
 ## Output
 
@@ -121,3 +143,26 @@ The run root resolves relative to the YAML file. Default fallback is `../runs`.
 The pipeline allocates the unique run ID and model/dataset/config subdirectories;
 do not attempt to force an existing run as the output model directory through
 unrecognized input keys. Absolute run paths are stored in the resolved config.
+
+## Observability console
+
+```yaml
+observability:
+  console_verbosity: concise
+```
+
+The section and field are optional; the default is `concise`.
+
+| Value | Terminal behavior |
+| --- | --- |
+| `quiet` | Run lifecycle, compact model/dataset summaries, final status, and important errors |
+| `concise` | Quiet output plus throttled progress, emitted training metrics, warnings, and errors |
+| `full` | Complete unfiltered LLaMA-Factory/Transformers stdout and stderr |
+
+Unknown observability keys and invalid values fail before a run directory is
+allocated. This is a bounded wrapper setting, not an unrestricted backend
+pass-through, and it does not change training arguments or hyperparameters.
+
+In every mode, `logs/train.log` contains pipeline lifecycle records plus the
+complete unfiltered backend stdout/stderr stream. Console filtering never removes
+backend content from that file.

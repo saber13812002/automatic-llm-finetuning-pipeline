@@ -41,6 +41,9 @@ def build_llamafactory_config(
         "template": resolved_template,
         "output_dir": str(output_dir),
     }
+    requested_revision = config["model"].get("revision")
+    if requested_revision is not None:
+        llama_config["model_revision"] = requested_revision
     llama_config.update(resolved_training.to_llamafactory_args())
     # LLaMA-Factory's model loader owns checkpointing and enables it by default.
     # The generic Trainer flag alone does not disable that loader behavior.
@@ -55,6 +58,7 @@ def generate_training_yaml(
     output_dir=None,
     output_file=None,
     training_config=None,
+    announce=True,
 ):
     """Write a validated LLaMA-Factory training configuration."""
     if output_file is None:
@@ -73,7 +77,8 @@ def generate_training_yaml(
     with output_file.open("w", encoding="utf-8") as file:
         yaml.safe_dump(llama_config, file, sort_keys=False)
 
-    print(f"LLaMA-Factory config created: {output_file}")
+    if announce:
+        print(f"LLaMA-Factory config created: {output_file}")
     return str(output_file)
 
 
@@ -83,6 +88,7 @@ def generate_lora_yaml(
     output_dir=None,
     output_file=None,
     training_config=None,
+    announce=True,
 ):
     """Backward-compatible alias for callers using the original function name."""
     return generate_training_yaml(
@@ -91,4 +97,5 @@ def generate_lora_yaml(
         output_dir=output_dir,
         output_file=output_file,
         training_config=training_config,
+        announce=announce,
     )

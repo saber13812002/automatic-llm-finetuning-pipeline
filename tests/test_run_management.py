@@ -118,12 +118,20 @@ class RunPipelineLifecycleTests(unittest.TestCase):
     def test_successful_run_writes_metadata_and_verifies_model(self):
         root = self.temporary_project_dir()
 
-        def create_adapter(yaml_file, log_file=None):
+        def create_adapter(yaml_file, log_file=None, **_kwargs):
             arguments = yaml.safe_load(Path(yaml_file).read_text(encoding="utf-8"))
             model_dir = Path(arguments["output_dir"])
             model_dir.mkdir(parents=True, exist_ok=True)
             (model_dir / "adapter_config.json").write_text("{}", encoding="utf-8")
             (model_dir / "adapter_model.safetensors").write_bytes(b"weights")
+            (model_dir / "train_results.json").write_text(
+                json.dumps({"train_loss": 0.75, "train_runtime": 4.0}),
+                encoding="utf-8",
+            )
+            (model_dir / "trainer_state.json").write_text(
+                json.dumps({"epoch": 1.0, "global_step": 2, "log_history": []}),
+                encoding="utf-8",
+            )
             if log_file is not None:
                 with Path(log_file).open("a", encoding="utf-8") as file:
                     file.write("mock training output\n")
@@ -140,6 +148,10 @@ class RunPipelineLifecycleTests(unittest.TestCase):
         self.assertEqual(metadata["dataset"]["format"], "alpaca")
         self.assertEqual(metadata["dataset"]["num_samples"], 2)
         self.assertEqual(metadata["training"]["method"], "lora")
+        self.assertEqual(metadata["schema_version"], 2)
+        self.assertEqual(metadata["training_metrics"]["train_loss"], 0.75)
+        self.assertEqual(metadata["training_metrics"]["global_step"], 2)
+        self.assertGreaterEqual(metadata["resources"]["training_wall_clock_seconds"], 0)
         self.assertEqual(metadata["output"]["model_dir"], str(run_dir / "model"))
         self.assertEqual(
             metadata["output"]["verified_artifacts"],

@@ -202,6 +202,7 @@ runs/<run_id>/
   logs/
     train.log
   model/
+  environment.json
   metadata.json
 ```
 
@@ -210,13 +211,35 @@ For HuggingFace and other non-file sources, `original_dataset.json` records the
 source identifier, subset, and split. LLaMA-Factory writes only to the run's
 `model/` directory, so a new run cannot resume or overwrite an older run.
 
-`metadata.json` records the model family/template, dataset source and detected
-format, sample count, training settings, model output path, timestamps, and
-run status. A run is marked `success` only after training exits successfully
+`metadata.json` schema v2 retains the model, dataset, training, output, timestamp,
+and status fields and adds requested/resolved model revision, revision lookup
+status, the exact normalized dataset path and SHA-256, environment/package/GPU
+details, optional container provenance, wall-clock duration, normalized final
+training metrics, and the base-to-adapter relationship. The environment snapshot
+is also stored in `environment.json`. A run is marked `success` only after training exits successfully
 and its expected artifacts have been verified. LoRA runs require
 `adapter_config.json` and `adapter_model.safetensors`; full fine-tuning requires
-`config.json` plus non-empty model weight files. Pipeline messages and the
-LLaMA-Factory subprocess output are saved to `logs/train.log`.
+`config.json` plus non-empty model weight files. Pipeline messages and combined
+LLaMA-Factory stdout/stderr are always saved to `logs/train.log`. Terminal
+presentation is independently selected with `observability.console_verbosity`:
+`quiet`, default `concise`, or unfiltered `full`. Concise mode streams recognized
+progress/loss/learning-rate/grad-norm fields live whenever the upstream trainer
+emits them and suppresses low-value backend INFO/configuration dumps.
+
+`logs/train.log` contains pipeline lifecycle records plus the complete unfiltered
+backend stdout/stderr stream regardless of console mode. Carriage-return progress
+is retained in the file; concise mode normalizes and throttles it for the terminal.
+
+Final values are normalized from `train_results.json`, `all_results.json`, and
+`trainer_state.json`; training loss is not labeled as accuracy. Per-step history
+stays authoritative in `trainer_state.json`. CUDA allocator counters are
+process-local, so the parent marks them unavailable instead of reporting
+whole-device shared-GPU memory as process usage. Optional probes fail open without
+weakening strict model-artifact validation.
+
+The provider-neutral `serving` block is a future handoff contract only. It does
+not provide endpoint serving, vLLM launch, LiteLLM registration, adapter merging,
+or Project #2 integration.
 
 The legacy `fine_tuning_pipeline/` folder contains only retained local artifacts,
 caches, and validation evidence. It is ignored and is not the source package.

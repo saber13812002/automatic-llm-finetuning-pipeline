@@ -7,11 +7,11 @@ Project #1 is functionally validated for the supported SFT/LoRA workflow. This
 repository uses an editable `src/` package, root tests, and documented example
 configs. The project's original code is licensed under [Apache License 2.0](LICENSE).
 
-Release version: `v1.0.0`. See [release notes](RELEASE_NOTES.md),
-[changelog](CHANGELOG.md), [publishing checklist](RELEASE_CHECKLIST.md), and
-[readiness audit](docs/release_readiness.md). Source publication is authorized;
-Docker execution and clean-target installation remain unverified. See the
-documented limitations before deployment.
+Latest tagged release: `v1.0.0`. Current `main` contains unreleased post-v1.0.0
+improvements. See [current main status](docs/current_status.md),
+[release notes](RELEASE_NOTES.md), [changelog](CHANGELOG.md),
+[publishing checklist](RELEASE_CHECKLIST.md), and
+[readiness audit](docs/release_readiness.md).
 
 ## Overview
 
@@ -58,6 +58,11 @@ logging, and metadata span the whole execution. See [architecture](docs/architec
 - Validated, configuration-driven training and LoRA parameters.
 - Unique run directories with input/resolved/training configuration snapshots.
 - Persistent pipeline/training logs and metadata tracking.
+- Versioned experiment metadata with exact normalized-dataset SHA-256 hashes,
+  best-effort Hub revisions, environment/container provenance, resource context,
+  and normalized final Trainer metrics.
+- Quiet, default concise, and full console modes while retaining the complete
+  unfiltered backend stream in `logs/train.log`.
 - Artifact validation before a run is declared successful.
 - Post-training adapter loading and inference validated during acceptance;
   inference is not an automatic extra step of every training execution.
@@ -116,9 +121,9 @@ python -m pip check
 
 The manifest pins the tested application stack and upstream source revision.
 PyTorch selection is host-specific; transitive packages are not fully locked.
-Fresh-environment and Docker/GPU reproduction have not been validated in this
-relocation pass. The existing validated `venv/` received only the editable
-application package; its training dependencies were not changed.
+Clean host-native installation remains a separate qualification gate. A narrow
+CUDA Docker/H100 BF16 LoRA smoke run has succeeded; it does not establish general
+GPU, driver, CUDA, model, precision, or full-fine-tuning compatibility.
 See [installation](docs/installation.md) for the recorded CPU versions, optional
 adapter-only dependencies, Conda bootstrap, and installation caveats.
 
@@ -167,9 +172,10 @@ are required. Do not put Hub tokens in build arguments or image files.
 
 See [Docker deployment](docs/docker.md) for PowerShell commands, UID/GID settings,
 GPU checks, named configs, credentials, and deployment acceptance. Base images
-and the core stack are pinned, not every OS/transitive package. Docker is not
-installed on the current validation host: image builds, container training, and
-GPU/H100 execution remain unvalidated.
+and the core stack are pinned, not every OS/transitive package. The historical
+Windows acceptance host had no Docker daemon. The later CUDA Docker workflow
+completed a real LoRA training run on one NVIDIA H100; see the
+[current status](docs/current_status.md) for its exact scope.
 
 ## Usage
 
@@ -188,6 +194,8 @@ Example configuration:
 ```yaml
 model:
   name: Qwen/Qwen2.5-0.5B-Instruct
+  # Optional Hub branch, tag, or commit; resolved commit is recorded when available.
+  # revision: main
 dataset:
   path: ../examples/datasets/alpaca_demo.json
   name: demo_dataset
@@ -209,6 +217,8 @@ training:
     dropout: 0.0
 output:
   runs_path: ../runs
+observability:
+  console_verbosity: concise
 ```
 
 Dataset/output paths are relative to the YAML file, not the shell's working
@@ -218,8 +228,31 @@ in [usage](docs/usage.md). Do not copy a named config into a different folder
 without adjusting its relative paths.
 
 Each execution saves `runs/<run_id>/config/`, `dataset/`, `logs/`, `model/`, and
-`metadata.json`. Success requires both process completion and expected nonempty
-artifacts. Use the recorded model output directory rather than legacy `models/`.
+`metadata.json`, plus `environment.json`. Metadata schema v2 preserves the
+original fields and adds revision resolution, the SHA-256 of the exact normalized
+dataset consumed by training, package/GPU/container context, wall-clock duration,
+final Trainer metrics, and an explicit base-model/adapter relationship. Success
+still requires both process completion and expected nonempty artifacts.
+
+Console output defaults to `concise`: lifecycle events, throttled progress,
+emitted training metrics, warnings, errors, and final metrics. Use `quiet` for
+lifecycle and errors only, or `full` for the complete unfiltered backend stream:
+
+```yaml
+observability:
+  console_verbosity: quiet  # quiet | concise | full
+```
+
+This affects terminal presentation only. `logs/train.log` contains pipeline
+lifecycle records plus the complete unfiltered LLaMA-Factory/Transformers stdout
+and stderr stream, including output hidden from `quiet` and `concise`. See
+[console observability](docs/observability.md).
+
+LoRA output is recorded as `lora_adapter`, not a standalone model. The
+provider-neutral `serving` block identifies the base, adapter, template, and a
+suggested unique ID for a future integration. This change does **not** implement
+endpoint serving, vLLM launch, LiteLLM registration, adapter merging, or Project
+#2 integration.
 
 ## Validated results
 
@@ -232,21 +265,30 @@ artifacts. Use the recorded model output directory rather than legacy `models/`.
 | Run isolation, logging, metadata, and LoRA artifact verification | PASS |
 | Original acceptance regression suite | 64 passed |
 | Post-relocation regression suite | 68 passed (64 original + 4 layout checks) |
-| Current suite with Docker deployment contract tests | 72 passed; host/static scope, not a container build |
+| Current suite, including console observability and Docker contract tests | 94 passed |
+| CUDA Docker build | PASS |
+| H100 Docker smoke | PASS: Qwen2.5-0.5B-Instruct, LoRA, BF16, one visible H100, tiny synthetic dataset, one epoch |
 
-Validation ran on Windows with CPU-only PyTorch. See the portable
-[acceptance report](docs/acceptance_report.md) for evidence, exact scope, and limitations.
+The original acceptance ran on Windows with CPU-only PyTorch. Later Docker/H100
+evidence supplements rather than rewrites that history. See the
+[current status](docs/current_status.md) and portable
+[acceptance report](docs/acceptance_report.md) for scope and limitations.
 
 ## Limitations
 
-- GPU/H100 production deployment has not been tested.
-- Dockerfiles are provided; actual image build/container acceptance is pending.
+- Runtime metadata reports visible GPU/container facts but does not qualify every
+  driver, CUDA, image, or orchestrator combination.
 - Full fine-tuning has configuration/unit coverage but no real full-method run.
 - QLoRA is not implemented; DPO training is also intentionally unsupported.
 - Large datasets are materialized in memory; 100k/1M-row scale was not validated.
 - Abrupt power loss can leave stale run status; automatic recovery is not implemented.
 - A LoRA adapter is not a standalone merged model; its base model is required.
+- Child-process CUDA allocator peaks are explicitly unavailable; whole-device
+  shared-GPU usage is never mislabeled as process-specific usage.
 - Minimal training and inference tests prove mechanics, not model quality improvement.
+- The accepted H100 smoke does not qualify all models, GPUs, drivers, CUDA
+  versions, FP16, full fine-tuning, larger models, large datasets, or production
+  serving.
 
 ## Developer documentation
 
@@ -266,8 +308,8 @@ With the environment active, run the existing regression suite:
 python -m unittest discover -s tests -v
 ```
 
-The approved relocation changes import/path references, not training logic.
-Release preparation does not change the trainer or qualify container deployment.
+Current documentation distinguishes the historical v1.0.0/relocation evidence
+from later unreleased validation. See [current main status](docs/current_status.md).
 
 ## License
 

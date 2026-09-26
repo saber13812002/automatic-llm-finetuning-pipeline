@@ -32,8 +32,9 @@ approved access regardless of container use.
 | PyTorch set | torch 2.11.0, torchvision 0.26.0, torchaudio 2.11.0 | Same matched versions, CUDA builds |
 
 The matched wheel set follows the [official PyTorch instructions](https://pytorch.org/get-started/previous-versions/).
-It is a new Linux deployment target, not a copy of the observed Windows/CPU wheel
-versions or a claim of new training acceptance. The CUDA base contains runtime
+It is a separate Linux deployment target, not a copy of the observed Windows/CPU
+wheel versions. The later validation section records its narrow training evidence.
+The CUDA base contains runtime
 libraries, not `nvcc`; no FlashAttention, QLoRA, or source-built CUDA extensions
 are added. Building either variant requires **no GPU**. Imports inspect the
 PyTorch build metadata; they do not assert an available CUDA device.
@@ -80,6 +81,11 @@ the builder. It is separate from Git ignore rules.
 The image retains the source checkout under `/app`, preserving default config
 resolution. It does not rely on a copied host virtual environment, a local
 `LLaMA-Factory/` checkout, or a standalone wheel containing configs.
+
+`docker/Dockerfile` is the only canonical public Docker build definition. The
+accepted server build required a server-local workaround for that environment's
+DNS resolution. That workaround is not part of the public repository or supported
+build interface, and no internal network details are included here.
 
 ## Run with persistent mounts
 
@@ -146,6 +152,21 @@ Always mount `runs/` for real work: `--rm` removes an unmounted container's outp
 Each training execution still creates a new isolated run. Check host
 `runs/<run_id>/metadata.json`, `logs/train.log`, and the verified `model/` output;
 container completion alone does not substitute for pipeline artifact validation.
+
+Docker does not reliably expose its own image tag or digest inside a generic
+container. A launcher that needs exact provenance should pass non-secret values:
+
+```bash
+docker run --rm --gpus all \
+  -e PIPELINE_CONTAINERIZED=true \
+  -e PIPELINE_CONTAINER_RUNTIME=docker \
+  -e PIPELINE_CONTAINER_IMAGE=automatic-llm-finetuner:cuda \
+  -e PIPELINE_CONTAINER_IMAGE_DIGEST=sha256:... \
+  ...
+```
+
+Unavailable values stay null and never fail training. Common container markers
+are detected, but normal host execution has no hard-coded Docker dependency.
 
 ## Non-root permissions
 
@@ -230,22 +251,28 @@ docker run --rm automatic-llm-finetuner cat /opt/deployment-requirements.txt
 docker image inspect automatic-llm-finetuner --format '{{.Id}}'
 ```
 
-For deployment acceptance, follow these with a minimal one-epoch LoRA run using
+For qualification on another deployment target, follow these with a minimal one-epoch LoRA run using
 the persistent mounts, verify run success/artifacts, and load base + adapter for
 inference on that target. Build tests do not establish model quality, GPU/H100
 qualification, or full fine-tuning acceptance. Tini forwards termination signals
 to the process group; abrupt termination can still leave stale run metadata,
 as already documented in [usage](usage.md).
 
-## Validation performed for this change
+## Validation status
 
-- Existing host regression suite plus four static Docker checks: **72 passed**.
-- Docker Hub base-image tags/digests verified; matched PyTorch versions checked
-  against official installation instructions.
-- No source, training requirements, Conda bootstrap, or package schema changed.
-- Docker is unavailable on the current Windows host. No image build, container
-  training/inference, or GPU execution is claimed as completed. Execute the
-  commands above on a Docker-enabled target before claiming deployment acceptance.
+- Current regression suite, including console observability and four static
+  Docker checks: **94 passed**.
+- Docker Hub base-image tags/digests were verified and matched PyTorch versions
+  were checked against official installation instructions.
+- The canonical CUDA image built successfully. A real acceptance smoke completed
+  with Qwen2.5-0.5B-Instruct, LoRA, BF16, one visible H100, a tiny synthetic
+  dataset, and one epoch. Adapter artifacts, metadata/provenance, final metrics,
+  and the complete log were verified.
+- This one run does not qualify all image revisions, GPUs, drivers, CUDA versions,
+  model families/sizes, datasets, FP16, full fine-tuning, or production serving.
+- The historical Windows/CPU host itself had no Docker daemon; its acceptance and
+  the later Docker/H100 evidence are separate environments.
 
 The original [Project #1 acceptance](acceptance_report.md) remains valid for its
-recorded Windows/CPU workflow. Docker qualification is a separate release gate.
+recorded Windows/CPU workflow. See [current status](current_status.md) for the
+authoritative combined scope.
